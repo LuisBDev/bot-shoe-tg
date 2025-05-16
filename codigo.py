@@ -7,8 +7,11 @@ import platform
 import requests
 from pathlib import Path
 from playwright.sync_api import sync_playwright
-from colorama import Fore, Style
+from colorama import Fore, Style, init
 import subprocess
+
+# Inicializa colorama para Windows
+init(autoreset=True)
 
 # Constantes de archivos
 EMAILS_FILE = "CORREOS.txt"
