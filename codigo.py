@@ -239,7 +239,6 @@ def toggle_tunnelbear():
     """Ejecuta el script de AutoHotkey para alternar el estado de TunnelBear VPN."""
     ahk_path = r"C:\\Program Files\\AutoHotkey\\v2\\AutoHotkey64.exe"
     script_path = os.path.abspath("scripttunnelbear.ahk")
-    print(f"Running AutoHotkey script: {script_path}")
     subprocess.run([ahk_path, script_path], check=True)
 
 
@@ -309,14 +308,14 @@ def procesar_tarjeta(tarjeta_linea):
                 context.close()
                 browser.close()
         if next_cvv:
-            print("Reiniciando IP con TunnelBear...")
+            print("Restarting IP Service...")
             try:
                 toggle_tunnelbear()
                 time.sleep(3)
                 toggle_tunnelbear()
                 time.sleep(15)
             except Exception as e:
-                print(f"Error al ejecutar el script de TunnelBear: {e}")
+                print(f"Error al ejecutar el script AHK: {e}")
             cvv_actual = next_cvv
             email = generar_email()
         else:
