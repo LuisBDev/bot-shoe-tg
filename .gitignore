@@ -1,4 +1,4 @@
-*.txt
+# *.txt
 !requirements.txt
 venv/
 # Byte-compiled / optimized / DLL files
