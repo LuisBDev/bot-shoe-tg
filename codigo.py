@@ -300,7 +300,7 @@ def lanzar_navegador_y_procesar(page, numero, mes, ano, cvv_actual, max_intentos
 
 def iniciar_checkout(page, email):
     """Realiza el flujo inicial de agregar producto y preparar checkout."""
-    page.goto("https://www.shoedazzle.com/products/Brooks-Western-Boot-HS2500629-9241")
+    page.goto("https://www.shoedazzle.com/products/Brooks-Western-Boot-HS2500629-9241", timeout=80000)
     page.get_by_role("button", name="Close").click()
     page.get_by_role("button", name="VIP Add to Bag").click()
     page.get_by_role("textbox", name="Email*").fill(email)
