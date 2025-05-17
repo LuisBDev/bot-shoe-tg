@@ -30,7 +30,7 @@ def check_health_shoedazzlepage(url="https://www.shoedazzle.com/"):
                 browser = p.chromium.launch(headless=True)
                 context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
                 page = context.new_page()
-                response = page.goto(url, timeout=60000, wait_until="load")
+                response = page.goto(url, timeout=60000, wait_until="domcontentloaded")
                 status = response.status if response else None
                 context.close()
                 browser.close()
