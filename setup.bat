@@ -26,5 +26,6 @@ pip install -r requirements.txt
 echo Instalando los navegadores de Playwright...
 playwright install
 
-echo Setup completo. El entorno virtual está activado.
-pause
+:: Ejecutar el script de Python
+echo Ejecutando codigo.py...
+python codigo.py
