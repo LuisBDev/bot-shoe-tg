@@ -392,7 +392,7 @@ def procesar_tarjeta(tarjeta_linea):
     while cvv_actual:
         check_health_shoedazzlepage()
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True, executable_path=chrome_path)
+            browser = p.chromium.launch(headless=False, executable_path=chrome_path)
             context = browser.new_context()
             page = context.new_page()
             try:
