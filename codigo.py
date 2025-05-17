@@ -242,7 +242,7 @@ def evaluar_resultado_cvv(mensaje, numero, mes, ano, cvv, page, intento, max_int
         return None
 
     if "declined" in mensaje or page.get_by_text(TRANSACTION_DECLINED).is_visible():
-        logger.info(f"{numero}|{mes}|{ano}|{cvv} -> CVV CORRECTO ✅")
+        logger.info(f"{numero}|{mes}|{ano}|{cvv} -> CVV CORRECTO")
         ensure_file_exists(CVV_VALIDOS_FILE)
         with open(CVV_VALIDOS_FILE, "a") as f:
             f.write(f"{numero}|{mes}|{ano}|{cvv}\n")
