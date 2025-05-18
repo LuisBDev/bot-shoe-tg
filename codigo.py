@@ -389,33 +389,84 @@ def procesar_tarjeta(tarjeta_linea):
     max_intentos = 6
     cvv_actual = start_cvv
     email = generar_email()
+    reintentos_browser = 0
+    max_reintentos_browser = 5
     while cvv_actual:
         check_health_shoedazzlepage()
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=False, executable_path=chrome_path)
-            context = browser.new_context()
-            page = context.new_page()
+        reintentar = True
+        while reintentar and reintentos_browser < max_reintentos_browser:
+            reintentar = False
             try:
-                iniciar_checkout(page, email)
-                next_cvv = lanzar_navegador_y_procesar(page, numero, mes, ano, cvv_actual, max_intentos)
+                with sync_playwright() as p:
+                    # Aumentar timeouts de page y robustez en errores
+                    try:
+                        browser = p.chromium.launch(headless=False, executable_path=chrome_path, timeout=180000)
+                    except Exception as e:
+                        logger.error(f"[{numero}] Error al lanzar browser: {e}")
+                        reintentos_browser += 1
+                        logger.warning(f"Reintentando con nuevo browser, intento {reintentos_browser}/{max_reintentos_browser}")
+                        next_cvv = get_start_cvv(numero, mes, ano)
+                        if not next_cvv:
+                            logger.error("No hay más CVVs para reintentar tras error de navegador.")
+                            break
+                        cvv_actual = next_cvv
+                        email = generar_email()
+                        reintentar = True
+                        continue
+                    try:
+                        context = browser.new_context()
+                        page = context.new_page()
+                        try:
+                            iniciar_checkout(page, email)
+                            next_cvv = lanzar_navegador_y_procesar(page, numero, mes, ano, cvv_actual, max_intentos)
+                        except Exception as e:
+                            logger.error(f"[{numero}] Error en flujo de navegador: {e}")
+                            reintentos_browser += 1
+                            logger.warning(f"Reintentando con nuevo browser, intento {reintentos_browser}/{max_reintentos_browser}")
+                            next_cvv = get_start_cvv(numero, mes, ano)
+                            if not next_cvv:
+                                logger.error("No hay más CVVs para reintentar tras error de navegador.")
+                                break
+                            cvv_actual = next_cvv
+                            email = generar_email()
+                            reintentar = True
+                            continue
+                        finally:
+                            try:
+                                context.close()
+                            except Exception as e:
+                                logger.error(f"Error al cerrar el contexto: {e}")
+                    finally:
+                        try:
+                            browser.close()
+                        except Exception as e:
+                            logger.error(f"Error al cerrar el browser: {e}")
+                    if next_cvv:
+                        logger.warning("Restarting IP Service...")
+                        try:
+                            toggle_tunnelbear()
+                            time.sleep(3)
+                            toggle_tunnelbear()
+                            time.sleep(15)
+                        except Exception as e:
+                            logger.error(f"Error al ejecutar el script AHK: {e}")
+                        cvv_actual = next_cvv
+                        email = generar_email()
+                    else:
+                        break
             except Exception as e:
-                logger.error(f"[{numero}] Error: {e}")
-                next_cvv = None
-            finally:
-                context.close()
-                browser.close()
-        if next_cvv:
-            logger.warning("Restarting IP Service...")
-            try:
-                toggle_tunnelbear()
-                time.sleep(3)
-                toggle_tunnelbear()
-                time.sleep(15)
-            except Exception as e:
-                logger.error(f"Error al ejecutar el script AHK: {e}")
-            cvv_actual = next_cvv
-            email = generar_email()
-        else:
+                logger.error(f"[{numero}] Error crítico fuera de Playwright: {e}")
+                reintentos_browser += 1
+                logger.warning(f"Reintentando con nuevo browser, intento {reintentos_browser}/{max_reintentos_browser}")
+                next_cvv = get_start_cvv(numero, mes, ano)
+                if not next_cvv:
+                    logger.error("No hay más CVVs para reintentar tras error crítico.")
+                    break
+                cvv_actual = next_cvv
+                email = generar_email()
+                reintentar = True
+        if reintentos_browser >= max_reintentos_browser:
+            logger.error(f"Se alcanzó el máximo de reintentos de browser para la tarjeta {numero}|{mes}|{ano}")
             break
 
 def cargar_tarjetas_disponibles():
