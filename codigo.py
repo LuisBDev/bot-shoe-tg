@@ -430,6 +430,16 @@ def procesar_tarjeta(tarjeta_linea):
                             cvv_actual = next_cvv
                             email = generar_email()
                             reintentar = True
+                            # Forzar cierre seguro del contexto y browser si la conexión se perdió
+                            try:
+                                context.close()
+                            except Exception as e:
+                                logger.error(f"Error al cerrar el contexto tras error de driver: {e}")
+                            try:
+                                browser.close()
+                            except Exception as e:
+                                logger.error(f"Error al cerrar el browser tras error de driver: {e}")
+                            time.sleep(5)  # Espera antes de reintentar para evitar reconexión inmediata
                             continue
                         finally:
                             try:
